@@ -3,12 +3,13 @@ settings.py - モザイク設定パネル / 検出器設定パネル（PySide6 �
 
 モザイクの種類・ブロックサイズ・ぼかし半径・黒帯設定などを
 PySide6 ウィジェットで設定するパネル（SettingsPanel）と、
-検出器の種類・接続先・API キーを設定するパネル（DetectorSettingsPanel）を提供します。
+検出器の種類・接続先・API キー・検出対象を設定するパネル（DetectorSettingsPanel）を提供します。
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -20,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.detector import BaseDetector, create_detector
+from ..core.detector import ALL_TARGETS, BaseDetector, DetectionTarget, create_detector
 from ..core.mosaic import MosaicConfig, MosaicType
 
 
@@ -129,12 +130,20 @@ _DETECTOR_DISPLAY_NAMES: dict[str, str] = {
     "OpenAI API (クラウド)": "openai",
 }
 
+#: 検出対象の表示名と DetectionTarget の対応
+_TARGET_DISPLAY: list[tuple[str, DetectionTarget]] = [
+    ("顔", DetectionTarget.FACE),
+    ("個人情報", DetectionTarget.PERSONAL_INFO),
+    ("センシティブな部位", DetectionTarget.SENSITIVE),
+]
+
 
 class DetectorSettingsPanel(QGroupBox):
     """
     検出器の種類と接続設定をまとめたパネルウィジェット。
     get_detector() で現在の設定に応じた BaseDetector インスタンスを返します。
     OpenAI API キーは画面上ではマスク表示します。
+    LLM 検出器選択時には検出対象（顔・個人情報・センシティブ）を個別に選択できます。
     """
 
     def __init__(self, parent=None) -> None:
@@ -169,6 +178,17 @@ class DetectorSettingsPanel(QGroupBox):
         openai_form.addRow("モデル名", self._openai_model)
         layout.addWidget(self._openai_group)
 
+        # 検出対象選択（LLM 検出器選択時のみ表示）
+        self._target_group = QGroupBox("検出対象")
+        target_layout = QVBoxLayout(self._target_group)
+        self._target_checkboxes: dict[DetectionTarget, QCheckBox] = {}
+        for label, target in _TARGET_DISPLAY:
+            cb = QCheckBox(label)
+            cb.setChecked(True)  # デフォルトは全選択
+            target_layout.addWidget(cb)
+            self._target_checkboxes[target] = cb
+        layout.addWidget(self._target_group)
+
         self._on_detector_changed()
 
     def _on_detector_changed(self) -> None:
@@ -176,12 +196,26 @@ class DetectorSettingsPanel(QGroupBox):
         selected = _DETECTOR_DISPLAY_NAMES.get(self._detector_cb.currentText(), "haar")
         self._ollama_group.setVisible(selected == "ollama")
         self._openai_group.setVisible(selected == "openai")
+        # LLM 検出器のときだけ検出対象を表示
+        self._target_group.setVisible(selected in ("ollama", "openai"))
+
+    def _get_selected_targets(self) -> frozenset[DetectionTarget]:
+        """チェックボックスの状態から選択された検出対象セットを返す。"""
+        selected = frozenset(
+            target
+            for target, cb in self._target_checkboxes.items()
+            if cb.isChecked()
+        )
+        # 何も選択されていない場合は全対象にフォールバック
+        return selected if selected else ALL_TARGETS
 
     def get_detector(self) -> BaseDetector:
         """現在の設定から BaseDetector インスタンスを生成して返す。"""
         detector_type = _DETECTOR_DISPLAY_NAMES.get(self._detector_cb.currentText(), "haar")
+        targets = self._get_selected_targets() if detector_type in ("ollama", "openai") else None
         return create_detector(
             detector_type,
+            targets=targets,
             ollama_host=self._ollama_host.text(),
             ollama_model=self._ollama_model.text(),
             openai_api_key=self._openai_key.text(),

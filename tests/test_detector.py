@@ -5,14 +5,18 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from mosaicman.core.detector import (
+    ALL_TARGETS,
     BaseDetector,
     DetectedRegion,
+    DetectionTarget,
     HaarCascadeDetector,
     OllamaDetector,
     OpenAIDetector,
     RegionDetector,
+    _build_detection_prompt,
     _deduplicate,
     _iou,
     _parse_llm_response,
@@ -133,7 +137,6 @@ def test_create_detector_haar() -> None:
 
 
 def test_create_detector_unknown_raises() -> None:
-    import pytest
     with pytest.raises(ValueError, match="不明な検出器タイプ"):
         create_detector("unknown_type")
 
@@ -146,9 +149,77 @@ def test_create_detector_ollama_instance() -> None:
 
 def test_create_detector_openai_raises_without_key() -> None:
     """API キーなしで OpenAIDetector を生成しようとすると ValueError が発生する。"""
-    import pytest
     with pytest.raises(ValueError, match="API キー"):
         create_detector("openai", openai_api_key="")
+
+
+# --------------------------------------------------------------------------- #
+#  DetectionTarget / _build_detection_prompt
+# --------------------------------------------------------------------------- #
+
+def test_detection_target_enum_values() -> None:
+    """DetectionTarget の各値が期待通りのキーを持つ。"""
+    assert DetectionTarget.FACE.value == "face"
+    assert DetectionTarget.PERSONAL_INFO.value == "personal_info"
+    assert DetectionTarget.SENSITIVE.value == "sensitive"
+
+
+def test_all_targets_contains_all_members() -> None:
+    """ALL_TARGETS がすべての DetectionTarget を含む。"""
+    assert ALL_TARGETS == frozenset(DetectionTarget)
+
+
+def test_build_prompt_default_contains_all_targets() -> None:
+    """targets=None のとき、プロンプトに全対象の説明が含まれる。"""
+    prompt = _build_detection_prompt(None)
+    assert "顔" in prompt
+    assert "個人を特定できる情報" in prompt
+    assert "センシティブな部位" in prompt
+
+
+def test_build_prompt_face_only() -> None:
+    """顔のみ指定したとき、プロンプトに顔の説明のみが含まれる。"""
+    prompt = _build_detection_prompt(frozenset({DetectionTarget.FACE}))
+    assert "顔" in prompt
+    assert "個人を特定できる情報" not in prompt
+    assert "センシティブな部位" not in prompt
+
+
+def test_build_prompt_personal_info_and_sensitive() -> None:
+    """個人情報とセンシティブのみ指定したとき、顔が含まれない。"""
+    prompt = _build_detection_prompt(
+        frozenset({DetectionTarget.PERSONAL_INFO, DetectionTarget.SENSITIVE})
+    )
+    assert "個人を特定できる情報" in prompt
+    assert "センシティブな部位" in prompt
+    assert "顔" not in prompt
+
+
+def test_build_prompt_empty_set_falls_back_to_all() -> None:
+    """空セットを渡したときは全対象にフォールバックする。"""
+    prompt = _build_detection_prompt(frozenset())
+    assert "顔" in prompt
+    assert "個人を特定できる情報" in prompt
+    assert "センシティブな部位" in prompt
+
+
+def test_create_detector_ollama_with_targets() -> None:
+    """targets を指定して OllamaDetector を生成できる。"""
+    targets = frozenset({DetectionTarget.FACE})
+    detector = create_detector("ollama", targets=targets)
+    assert isinstance(detector, OllamaDetector)
+    # プロンプトに顔のみ含まれ、個人情報は含まれない
+    assert "顔" in detector._prompt
+    assert "個人を特定できる情報" not in detector._prompt
+
+
+def test_create_detector_openai_with_targets() -> None:
+    """targets を指定して OpenAIDetector を生成できる。"""
+    targets = frozenset({DetectionTarget.SENSITIVE})
+    detector = create_detector("openai", targets=targets, openai_api_key="sk-test")
+    assert isinstance(detector, OpenAIDetector)
+    assert "センシティブな部位" in detector._prompt
+    assert "顔" not in detector._prompt
 
 
 # --------------------------------------------------------------------------- #
@@ -162,7 +233,6 @@ def test_ollama_detector_not_installed_raises(sample_image_rgb) -> None:
     try:
         det_mod._OLLAMA_AVAILABLE = False
         detector = OllamaDetector(model="llava")
-        import pytest
         with pytest.raises(ImportError, match="ollama"):
             detector.detect(sample_image_rgb)
     finally:
@@ -204,7 +274,6 @@ def test_openai_detector_not_installed_raises(sample_image_rgb) -> None:
     try:
         det_mod._OPENAI_AVAILABLE = False
         detector = OpenAIDetector(api_key="sk-test")
-        import pytest
         with pytest.raises(ImportError, match="openai"):
             detector.detect(sample_image_rgb)
     finally:

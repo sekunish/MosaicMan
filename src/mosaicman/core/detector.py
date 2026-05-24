@@ -13,11 +13,14 @@ detector.py - 領域検出モジュール
 
 すべての検出器は BaseDetector を実装しており、 create_detector() で
 文字列指定するだけで切り替えられます。
+
+LLM 検出器では DetectionTarget で検出対象を選択できます。
 """
 
 from __future__ import annotations
 
 import base64
+import enum
 import io
 import json
 import logging
@@ -50,17 +53,66 @@ except ImportError:
     _OPENAI_AVAILABLE = False
 
 # --------------------------------------------------------------------------- #
-#  LLM へ送るプロンプト（日本語で記述し、JSON のみを要求する）
+#  検出対象の種別
 # --------------------------------------------------------------------------- #
-_DETECTION_PROMPT = (
-    "この画像を分析し、モザイク処理が推奨される領域（顔、個人を特定できる情報、"
-    "センシティブな部位など）をすべて特定してください。\n"
-    "検出した各領域を以下の JSON 形式のみで返してください。"
-    "座標は画像の左上を原点(0,0)とするピクセル値です。説明文は不要です。\n"
-    '[{"x": <左端X>, "y": <上端Y>, "width": <幅>, "height": <高さ>, '
-    '"label": "<内容>", "confidence": <0.0〜1.0>}]\n'
-    "領域が検出されない場合は空配列 [] を返してください。"
-)
+
+class DetectionTarget(enum.Enum):
+    """LLM 検出器で指定できる検出対象の種別。"""
+
+    FACE = "face"
+    """顔（正面・横顔・後頭部を含む）。"""
+
+    PERSONAL_INFO = "personal_info"
+    """個人を特定できる情報（名前・住所・電話番号・メールアドレスなど）。"""
+
+    SENSITIVE = "sensitive"
+    """センシティブな部位（身体の露出部位・医療情報など）。"""
+
+
+#: 全検出対象のデフォルトセット
+ALL_TARGETS: frozenset[DetectionTarget] = frozenset(DetectionTarget)
+
+#: 各検出対象を日本語で説明する辞書（プロンプト生成に使用）
+_TARGET_DESCRIPTIONS: dict[DetectionTarget, str] = {
+    DetectionTarget.FACE: "顔",
+    DetectionTarget.PERSONAL_INFO: "個人を特定できる情報（名前・住所・電話番号など）",
+    DetectionTarget.SENSITIVE: "センシティブな部位",
+}
+
+
+# --------------------------------------------------------------------------- #
+#  LLM へ送るプロンプト生成（日本語で記述し、JSON のみを要求する）
+# --------------------------------------------------------------------------- #
+
+def _build_detection_prompt(
+    targets: frozenset[DetectionTarget] | None = None,
+) -> str:
+    """
+    指定された検出対象に応じた LLM 用プロンプトを生成する。
+
+    Parameters
+    ----------
+    targets:
+        検出対象のセット。``None`` または空セットの場合はすべての対象を検出する。
+    """
+    if not targets:
+        targets = ALL_TARGETS
+
+    # 定義順（enum 宣言順）で並べる
+    descriptions = [
+        _TARGET_DESCRIPTIONS[t] for t in DetectionTarget if t in targets
+    ]
+    target_str = "、".join(descriptions)
+
+    return (
+        f"この画像を分析し、モザイク処理が推奨される領域（{target_str}など）を"
+        "すべて特定してください。\n"
+        "検出した各領域を以下の JSON 形式のみで返してください。"
+        "座標は画像の左上を原点(0,0)とするピクセル値です。説明文は不要です。\n"
+        '[{"x": <左端X>, "y": <上端Y>, "width": <幅>, "height": <高さ>, '
+        '"label": "<内容>", "confidence": <0.0〜1.0>}]\n'
+        "領域が検出されない場合は空配列 [] を返してください。"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -286,6 +338,7 @@ class OllamaDetector(BaseDetector):
         self,
         model: str = "llava",
         host: str = "http://localhost:11434",
+        targets: frozenset[DetectionTarget] | None = None,
     ) -> None:
         """
         Parameters
@@ -294,9 +347,12 @@ class OllamaDetector(BaseDetector):
             使用する Ollama モデル名（例: "llava", "moondream", "llava-phi3"）。
         host:
             Ollama サーバーの URL。
+        targets:
+            検出対象のセット。``None`` の場合はすべての対象（顔・個人情報・センシティブ）を検出する。
         """
         self._model = model
         self._host = host
+        self._prompt = _build_detection_prompt(targets)
 
     def detect(self, image: np.ndarray) -> list[DetectedRegion]:
         """Ollama Vision モデルで推奨領域を検出する。"""
@@ -316,7 +372,7 @@ class OllamaDetector(BaseDetector):
             messages=[
                 {
                     "role": "user",
-                    "content": _DETECTION_PROMPT,
+                    "content": self._prompt,
                     # ollama SDK は Base64 文字列を images フィールドで受け取る
                     "images": [image_b64],
                 }
@@ -350,6 +406,7 @@ class OpenAIDetector(BaseDetector):
         self,
         api_key: str,
         model: str = "gpt-4o",
+        targets: frozenset[DetectionTarget] | None = None,
     ) -> None:
         """
         Parameters
@@ -358,11 +415,14 @@ class OpenAIDetector(BaseDetector):
             OpenAI API キー（sk-... 形式）。コード内やログに残さないこと。
         model:
             使用するモデル名（例: "gpt-4o", "gpt-4o-mini"）。
+        targets:
+            検出対象のセット。``None`` の場合はすべての対象（顔・個人情報・センシティブ）を検出する。
         """
         if not api_key:
             raise ValueError("OpenAI API キーが設定されていません。")
         self._api_key = api_key
         self._model = model
+        self._prompt = _build_detection_prompt(targets)
 
     def detect(self, image: np.ndarray) -> list[DetectedRegion]:
         """OpenAI Vision API で推奨領域を検出する。"""
@@ -384,7 +444,7 @@ class OpenAIDetector(BaseDetector):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": _DETECTION_PROMPT},
+                        {"type": "text", "text": self._prompt},
                         {
                             "type": "image_url",
                             "image_url": {
@@ -411,6 +471,7 @@ class OpenAIDetector(BaseDetector):
 def create_detector(
     detector_type: str = "haar",
     *,
+    targets: frozenset[DetectionTarget] | None = None,
     ollama_host: str = "http://localhost:11434",
     ollama_model: str = "llava",
     openai_api_key: str = "",
@@ -423,6 +484,9 @@ def create_detector(
     ----------
     detector_type:
         "haar" | "ollama" | "openai"
+    targets:
+        LLM 検出器で使用する検出対象のセット。``None`` の場合はすべての対象を検出する。
+        Haar 分類器では無視される。
     ollama_host:
         Ollama サーバーの URL（detector_type="ollama" 時に使用）。
     ollama_model:
@@ -435,9 +499,9 @@ def create_detector(
     if detector_type == "haar":
         return HaarCascadeDetector()
     if detector_type == "ollama":
-        return OllamaDetector(model=ollama_model, host=ollama_host)
+        return OllamaDetector(model=ollama_model, host=ollama_host, targets=targets)
     if detector_type == "openai":
-        return OpenAIDetector(api_key=openai_api_key, model=openai_model)
+        return OpenAIDetector(api_key=openai_api_key, model=openai_model, targets=targets)
     raise ValueError(f"不明な検出器タイプです: {detector_type!r}。'haar' / 'ollama' / 'openai' から選択してください。")
 
 
