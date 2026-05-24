@@ -93,9 +93,10 @@ def _build_detection_prompt(
     Parameters
     ----------
     targets:
-        検出対象のセット。``None`` または空セットの場合はすべての対象を検出する。
+        検出対象のセット。``None``（デフォルト指定）の場合、または空セットの場合は
+        すべての対象を検出する。
     """
-    if not targets:
+    if targets is None or not targets:
         targets = ALL_TARGETS
 
     # 定義順（enum 宣言順）で並べる

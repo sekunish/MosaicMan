@@ -203,6 +203,14 @@ def test_build_prompt_empty_set_falls_back_to_all() -> None:
     assert "センシティブな部位" in prompt
 
 
+def test_build_prompt_none_falls_back_to_all() -> None:
+    """None を明示的に渡したときも全対象にフォールバックする。"""
+    prompt = _build_detection_prompt(None)
+    assert "顔" in prompt
+    assert "個人を特定できる情報" in prompt
+    assert "センシティブな部位" in prompt
+
+
 def test_create_detector_ollama_with_targets() -> None:
     """targets を指定して OllamaDetector を生成できる。"""
     targets = frozenset({DetectionTarget.FACE})

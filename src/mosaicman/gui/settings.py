@@ -200,13 +200,17 @@ class DetectorSettingsPanel(QGroupBox):
         self._target_group.setVisible(selected in ("ollama", "openai"))
 
     def _get_selected_targets(self) -> frozenset[DetectionTarget]:
-        """チェックボックスの状態から選択された検出対象セットを返す。"""
+        """チェックボックスの状態から選択された検出対象セットを返す。
+        
+        すべてのチェックボックスが外れている場合は全対象にフォールバックする。
+        「何も検出しない」という設定は無意味なため、意図しない全解除を防ぐ。
+        """
         selected = frozenset(
             target
             for target, cb in self._target_checkboxes.items()
             if cb.isChecked()
         )
-        # 何も選択されていない場合は全対象にフォールバック
+        # すべて未選択の場合は全対象にフォールバック（意図しない全解除を防止）
         return selected if selected else ALL_TARGETS
 
     def get_detector(self) -> BaseDetector:
