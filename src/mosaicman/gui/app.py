@@ -17,11 +17,11 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from ..core.detector import RegionDetector
+from ..core.detector import BaseDetector
 from ..core.media import ImageMedia, VideoMedia, SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_VIDEO_EXTENSIONS
 from ..core.mosaic import MosaicConfig, MosaicEngine
 from .preview import PreviewCanvas
-from .settings import SettingsPanel
+from .settings import DetectorSettingsPanel, SettingsPanel
 
 
 class MosaicApp(tk.Tk):
@@ -42,7 +42,6 @@ class MosaicApp(tk.Tk):
         self.title("MosaicMan - モザイク自動付与ツール")
         self.geometry("1200x800")
         self._engine = MosaicEngine()
-        self._detector = RegionDetector()
         self._current_image: Image.Image | None = None
         self._current_path: Path | None = None
         self._applied_image: Image.Image | None = None
@@ -50,6 +49,7 @@ class MosaicApp(tk.Tk):
         self._status_var = tk.StringVar(value="準備完了")
         self._preview_canvas: PreviewCanvas | None = None
         self._settings_panel: SettingsPanel | None = None
+        self._detector_panel: DetectorSettingsPanel | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -75,8 +75,14 @@ class MosaicApp(tk.Tk):
         self._preview_canvas = PreviewCanvas(content)
         self._preview_canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
-        self._settings_panel = SettingsPanel(content, padding=8)
-        self._settings_panel.grid(row=0, column=1, sticky="ns")
+        right_panel = ttk.Frame(content)
+        right_panel.grid(row=0, column=1, sticky="ns")
+
+        self._detector_panel = DetectorSettingsPanel(right_panel, padding=8)
+        self._detector_panel.pack(fill=tk.X, pady=(0, 8))
+
+        self._settings_panel = SettingsPanel(right_panel, padding=8)
+        self._settings_panel.pack(fill=tk.X)
 
         status_bar = ttk.Label(self, textvariable=self._status_var, anchor=tk.W, padding=8)
         status_bar.grid(row=2, column=0, sticky="ew")
@@ -123,15 +129,26 @@ class MosaicApp(tk.Tk):
             self._update_status("読み込みに失敗しました")
 
     def _detect_regions(self) -> None:
-        """現在画像に対して推薦領域検出をバックグラウンド実行する。"""
+        """現在画像に対して推薦領域検出をバックグラウンド実行する。
+
+        DetectorSettingsPanel の設定に基づいて検出器インスタンスを生成するため、
+        「検出」を押すたびに最新の設定が反映されます。
+        """
         if self._current_image is None:
             messagebox.showinfo("情報", "先にファイルを開いてください。")
+            return
+
+        assert self._detector_panel is not None
+        try:
+            detector = self._detector_panel.get_detector()
+        except Exception as exc:  # pragma: no cover - GUI 例外経路
+            messagebox.showerror("検出器設定エラー", str(exc))
             return
 
         def worker() -> None:
             try:
                 self._update_status("領域を検出しています...")
-                detected = self._detector.detect_from_pil(self._current_image)
+                detected = detector.detect_from_pil(self._current_image)
                 self.after(0, lambda: self._apply_detected_regions(detected))
             except Exception as exc:
                 self.after(0, lambda: messagebox.showerror("検出エラー", str(exc)))

@@ -8,12 +8,30 @@ version = "0.1.0"
 description = "Desktop mosaic editor for images and videos"
 readme = "README.md"
 requires-python = ">=3.11"
+# すべてのコア依存ライブラリはOSS・商用フリーなライセンスで提供されています。
+# opencv-python : Apache License 2.0
+# Pillow        : HPND (Historical Permission Notice and Disclaimer)
+# numpy         : BSD 3-Clause
+# ffmpeg-python : Apache License 2.0 (ラッパー)
+#                 ※ FFmpeg バイナリ本体の LGPL/GPL ライセンスに注意（オプション利用）
 dependencies = [
   "opencv-python>=4.8.1.78",
   "Pillow>=10.2.0",
   "numpy>=1.24",
-  "ffmpeg-python>=0.2.0",
+  "ffmpeg-python>=0.2.0",  # 動画の高品質出力に使用（任意）; FFmpeg バイナリが別途必要
 ]
+
+[project.optional-dependencies]
+# LLM を使った高精度領域検出を使う場合にインストール
+# uv add "mosaicman[llm]"
+# ollama : MIT License  (ローカル LLM、プライバシー重視の場合に推奨)
+# openai : Apache License 2.0 (クラウド API、画像データが外部サーバへ送信される)
+llm = [
+  "ollama>=0.4.0",
+  "openai>=1.0",
+]
+ollama = ["ollama>=0.4.0"]
+openai-api = ["openai>=1.0"]
 
 [project.scripts]
 mosaicman = "mosaicman.main:main"
