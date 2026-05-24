@@ -1,89 +1,128 @@
 """
-settings.py - モザイク設定パネル / 検出器設定パネル
+settings.py - モザイク設定パネル / 検出器設定パネル（PySide6 版）
 
 モザイクの種類・ブロックサイズ・ぼかし半径・黒帯設定などを
-tkinter ウィジェットで設定するパネル（SettingsPanel）と、
+PySide6 ウィジェットで設定するパネル（SettingsPanel）と、
 検出器の種類・接続先・API キーを設定するパネル（DetectorSettingsPanel）を提供します。
 """
-
 from __future__ import annotations
 
-import tkinter as tk
-from tkinter import ttk
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..core.detector import BaseDetector, create_detector
 from ..core.mosaic import MosaicConfig, MosaicType
 
 
-class SettingsPanel(ttk.LabelFrame):
+class _LabeledSlider(QWidget):
+    """スライダーと現在値ラベルを横並びにした複合ウィジェット。"""
+
+    def __init__(self, min_val: int, max_val: int, step: int = 1, parent=None) -> None:
+        super().__init__(parent)
+        self._slider = QSlider(Qt.Orientation.Horizontal)
+        self._slider.setRange(min_val, max_val)
+        self._slider.setSingleStep(step)
+        self._slider.setPageStep(step)
+        self._slider.setTickInterval(step)
+        self._label = QLabel()
+        self._slider.valueChanged.connect(lambda value: self._label.setText(str(value)))
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._slider)
+        layout.addWidget(self._label)
+        self._label.setFixedWidth(40)
+        self._label.setText(str(self._slider.value()))
+
+    def value(self) -> int:
+        return self._slider.value()
+
+    def setValue(self, value: int) -> None:
+        self._slider.setValue(value)
+
+    def valueChanged(self):
+        return self._slider.valueChanged
+
+
+class SettingsPanel(QGroupBox):
     """
     モザイク設定をまとめたパネルウィジェット。
-    get_config() で現在の設定を MosaicConfig として取得できる。
+    get_config() で現在の設定を MosaicConfig として取得できます。
     """
 
-    def __init__(self, parent: tk.Misc, **kwargs: object) -> None:
-        """設定用変数と UI を初期化する。"""
-        super().__init__(parent, text="モザイク設定", **kwargs)
-        self._type_var = tk.StringVar(value="ピクセル化")
-        self._block_size_var = tk.IntVar(value=15)
-        self._blur_radius_var = tk.IntVar(value=21)
-        self._bar_count_var = tk.IntVar(value=5)
-        self._bar_angle_var = tk.DoubleVar(value=0.0)
-        self._bar_opacity_var = tk.DoubleVar(value=1.0)
-        self._type_map = {
-            "ピクセル化": MosaicType.PIXELATE,
-            "ぼかし": MosaicType.BLUR,
-            "黒帯": MosaicType.BLACK_BARS,
-        }
-        self._reverse_type_map = {value: key for key, value in self._type_map.items()}
+    _TYPE_MAP = {
+        "ピクセル化": MosaicType.PIXELATE,
+        "ぼかし": MosaicType.BLUR,
+        "黒帯": MosaicType.BLACK_BARS,
+    }
+    _REVERSE_TYPE_MAP = {value: key for key, value in _TYPE_MAP.items()}
+
+    def __init__(self, parent=None) -> None:
+        super().__init__("モザイク設定", parent)
         self._build_ui()
 
     def _build_ui(self) -> None:
-        """各種スライダーとコンボボックスを構築する。"""
-        self.columnconfigure(1, weight=1)
+        form = QFormLayout(self)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
 
-        controls = [
-            ("種類", ttk.Combobox(self, textvariable=self._type_var, values=list(self._type_map.keys()), state="readonly")),
-            ("ブロックサイズ", ttk.Scale(self, from_=5, to=100, variable=self._block_size_var, orient=tk.HORIZONTAL)),
-            ("ぼかし半径", ttk.Scale(self, from_=3, to=101, variable=self._blur_radius_var, orient=tk.HORIZONTAL)),
-            ("黒帯本数", ttk.Scale(self, from_=1, to=20, variable=self._bar_count_var, orient=tk.HORIZONTAL)),
-            ("黒帯角度", ttk.Scale(self, from_=0, to=180, variable=self._bar_angle_var, orient=tk.HORIZONTAL)),
-            ("黒帯不透明度", ttk.Scale(self, from_=0.0, to=1.0, variable=self._bar_opacity_var, orient=tk.HORIZONTAL)),
-        ]
+        self._type_cb = QComboBox()
+        self._type_cb.addItems(list(self._TYPE_MAP.keys()))
+        form.addRow("種類", self._type_cb)
 
-        for row, (label, widget) in enumerate(controls):
-            ttk.Label(self, text=label).grid(row=row, column=0, sticky="w", padx=8, pady=6)
-            widget.grid(row=row, column=1, sticky="ew", padx=8, pady=6)
+        self._block_size = _LabeledSlider(5, 100)
+        self._block_size.setValue(15)
+        form.addRow("ブロックサイズ", self._block_size)
+
+        self._blur_radius = _LabeledSlider(3, 101, step=2)
+        self._blur_radius.setValue(21)
+        form.addRow("ぼかし半径", self._blur_radius)
+
+        self._bar_count = _LabeledSlider(1, 20)
+        self._bar_count.setValue(5)
+        form.addRow("黒帯本数", self._bar_count)
+
+        self._bar_angle = _LabeledSlider(0, 180)
+        self._bar_angle.setValue(0)
+        form.addRow("黒帯角度", self._bar_angle)
+
+        self._bar_opacity = _LabeledSlider(0, 100)
+        self._bar_opacity.setValue(100)
+        form.addRow("黒帯不透明度 (%)", self._bar_opacity)
 
     def get_config(self) -> MosaicConfig:
         """現在の UI 状態を MosaicConfig に変換する。"""
-        blur_radius = int(round(self._blur_radius_var.get()))
-        if blur_radius % 2 == 0:
-            blur_radius += 1
+        blur = self._blur_radius.value()
+        if blur % 2 == 0:
+            blur += 1
         return MosaicConfig(
-            mosaic_type=self._type_map[self._type_var.get()],
-            block_size=int(round(self._block_size_var.get())),
-            blur_radius=blur_radius,
-            bar_count=int(round(self._bar_count_var.get())),
-            bar_angle=float(self._bar_angle_var.get()),
-            bar_opacity=float(self._bar_opacity_var.get()),
+            mosaic_type=self._TYPE_MAP[self._type_cb.currentText()],
+            block_size=self._block_size.value(),
+            blur_radius=blur,
+            bar_count=self._bar_count.value(),
+            bar_angle=float(self._bar_angle.value()),
+            bar_opacity=self._bar_opacity.value() / 100.0,
         )
 
     def set_config(self, config: MosaicConfig) -> None:
         """MosaicConfig の内容を UI へ反映する。"""
-        self._type_var.set(self._reverse_type_map[config.mosaic_type])
-        self._block_size_var.set(config.block_size)
-        self._blur_radius_var.set(config.blur_radius)
-        self._bar_count_var.set(config.bar_count)
-        self._bar_angle_var.set(config.bar_angle)
-        self._bar_opacity_var.set(config.bar_opacity)
+        self._type_cb.setCurrentText(self._REVERSE_TYPE_MAP[config.mosaic_type])
+        self._block_size.setValue(config.block_size)
+        self._blur_radius.setValue(config.blur_radius)
+        self._bar_count.setValue(config.bar_count)
+        self._bar_angle.setValue(int(config.bar_angle))
+        self._bar_opacity.setValue(int(config.bar_opacity * 100))
 
 
-# --------------------------------------------------------------------------- #
-#  検出器設定パネル
-# --------------------------------------------------------------------------- #
-
-#: 表示名 → create_detector() に渡す detector_type 文字列
 _DETECTOR_DISPLAY_NAMES: dict[str, str] = {
     "Haar分類器 (ローカル・追加不要)": "haar",
     "Ollama LLM (ローカル)": "ollama",
@@ -91,92 +130,60 @@ _DETECTOR_DISPLAY_NAMES: dict[str, str] = {
 }
 
 
-class DetectorSettingsPanel(ttk.LabelFrame):
+class DetectorSettingsPanel(QGroupBox):
     """
     検出器の種類と接続設定をまとめたパネルウィジェット。
-
     get_detector() で現在の設定に応じた BaseDetector インスタンスを返します。
-    OpenAI API キーは画面上ではマスク表示し、ログへ出力しません。
+    OpenAI API キーは画面上ではマスク表示します。
     """
 
-    def __init__(self, parent: tk.Misc, **kwargs: object) -> None:
-        """設定用変数と UI を初期化する。"""
-        super().__init__(parent, text="検出器設定", **kwargs)
-        self._detector_var = tk.StringVar(value=list(_DETECTOR_DISPLAY_NAMES.keys())[0])
-        self._ollama_host_var = tk.StringVar(value="http://localhost:11434")
-        self._ollama_model_var = tk.StringVar(value="llava")
-        self._openai_key_var = tk.StringVar(value="")
-        self._openai_model_var = tk.StringVar(value="gpt-4o")
-        # 各検出器固有設定を格納するフレームの参照（show/hide 用）
-        self._ollama_frame: ttk.Frame | None = None
-        self._openai_frame: ttk.Frame | None = None
+    def __init__(self, parent=None) -> None:
+        super().__init__("検出器設定", parent)
         self._build_ui()
-        self._on_detector_changed()
 
     def _build_ui(self) -> None:
-        """検出器種別コンボと、種別ごとの設定フレームを構築する。"""
-        self.columnconfigure(1, weight=1)
+        layout = QVBoxLayout(self)
 
-        # --- 検出器種別 ---
-        ttk.Label(self, text="検出器").grid(row=0, column=0, sticky="w", padx=8, pady=6)
-        detector_cb = ttk.Combobox(
-            self,
-            textvariable=self._detector_var,
-            values=list(_DETECTOR_DISPLAY_NAMES.keys()),
-            state="readonly",
-            width=28,
-        )
-        detector_cb.grid(row=0, column=1, sticky="ew", padx=8, pady=6)
-        detector_cb.bind("<<ComboboxSelected>>", lambda _e: self._on_detector_changed())
+        form_top = QFormLayout()
+        self._detector_cb = QComboBox()
+        self._detector_cb.addItems(list(_DETECTOR_DISPLAY_NAMES.keys()))
+        self._detector_cb.currentIndexChanged.connect(self._on_detector_changed)
+        form_top.addRow("検出器", self._detector_cb)
+        layout.addLayout(form_top)
 
-        # --- Ollama 固有設定 ---
-        self._ollama_frame = ttk.Frame(self)
-        self._ollama_frame.columnconfigure(1, weight=1)
-        ttk.Label(self._ollama_frame, text="Ollamaホスト").grid(
-            row=0, column=0, sticky="w", padx=8, pady=4)
-        ttk.Entry(self._ollama_frame, textvariable=self._ollama_host_var).grid(
-            row=0, column=1, sticky="ew", padx=8, pady=4)
-        ttk.Label(self._ollama_frame, text="モデル名").grid(
-            row=1, column=0, sticky="w", padx=8, pady=4)
-        ttk.Entry(self._ollama_frame, textvariable=self._ollama_model_var).grid(
-            row=1, column=1, sticky="ew", padx=8, pady=4)
+        self._ollama_group = QGroupBox("Ollama 設定")
+        ollama_form = QFormLayout(self._ollama_group)
+        self._ollama_host = QLineEdit("http://localhost:11434")
+        self._ollama_model = QLineEdit("llava")
+        ollama_form.addRow("ホスト", self._ollama_host)
+        ollama_form.addRow("モデル名", self._ollama_model)
+        layout.addWidget(self._ollama_group)
 
-        # --- OpenAI 固有設定 ---
-        self._openai_frame = ttk.Frame(self)
-        self._openai_frame.columnconfigure(1, weight=1)
-        ttk.Label(self._openai_frame, text="APIキー").grid(
-            row=0, column=0, sticky="w", padx=8, pady=4)
-        # API キーはマスク表示（show="*"）してスクリーンショット等に残さない
-        ttk.Entry(self._openai_frame, textvariable=self._openai_key_var, show="*").grid(
-            row=0, column=1, sticky="ew", padx=8, pady=4)
-        ttk.Label(self._openai_frame, text="モデル名").grid(
-            row=1, column=0, sticky="w", padx=8, pady=4)
-        ttk.Entry(self._openai_frame, textvariable=self._openai_model_var).grid(
-            row=1, column=1, sticky="ew", padx=8, pady=4)
+        self._openai_group = QGroupBox("OpenAI 設定")
+        openai_form = QFormLayout(self._openai_group)
+        self._openai_key = QLineEdit()
+        self._openai_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._openai_key.setPlaceholderText("sk-...")
+        self._openai_model = QLineEdit("gpt-4o")
+        openai_form.addRow("APIキー", self._openai_key)
+        openai_form.addRow("モデル名", self._openai_model)
+        layout.addWidget(self._openai_group)
+
+        self._on_detector_changed()
 
     def _on_detector_changed(self) -> None:
-        """検出器種別の変更に応じて固有設定フレームを表示/非表示にする。"""
-        assert self._ollama_frame is not None
-        assert self._openai_frame is not None
-        selected = _DETECTOR_DISPLAY_NAMES.get(self._detector_var.get(), "haar")
-
-        if selected == "ollama":
-            self._openai_frame.grid_remove()
-            self._ollama_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
-        elif selected == "openai":
-            self._ollama_frame.grid_remove()
-            self._openai_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
-        else:
-            self._ollama_frame.grid_remove()
-            self._openai_frame.grid_remove()
+        """検出器種別に応じて固有設定グループを表示/非表示にする。"""
+        selected = _DETECTOR_DISPLAY_NAMES.get(self._detector_cb.currentText(), "haar")
+        self._ollama_group.setVisible(selected == "ollama")
+        self._openai_group.setVisible(selected == "openai")
 
     def get_detector(self) -> BaseDetector:
         """現在の設定から BaseDetector インスタンスを生成して返す。"""
-        detector_type = _DETECTOR_DISPLAY_NAMES.get(self._detector_var.get(), "haar")
+        detector_type = _DETECTOR_DISPLAY_NAMES.get(self._detector_cb.currentText(), "haar")
         return create_detector(
             detector_type,
-            ollama_host=self._ollama_host_var.get(),
-            ollama_model=self._ollama_model_var.get(),
-            openai_api_key=self._openai_key_var.get(),
-            openai_model=self._openai_model_var.get(),
+            ollama_host=self._ollama_host.text(),
+            ollama_model=self._ollama_model.text(),
+            openai_api_key=self._openai_key.text(),
+            openai_model=self._openai_model.text(),
         )

@@ -19,6 +19,9 @@ dependencies = [
   "Pillow>=10.2.0",
   "numpy>=1.24",
   "ffmpeg-python>=0.2.0",  # 動画の高品質出力に使用（任意）; FFmpeg バイナリが別途必要
+  # FFmpeg バイナリのライセンスについては https://ffmpeg.org/legal.html を参照してください。
+  # GPL コンポーネントを含むビルドを同梱する場合はソース開示義務が生じます。
+  "PySide6>=6.7",
 ]
 
 [project.optional-dependencies]

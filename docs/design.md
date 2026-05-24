@@ -65,7 +65,7 @@ LLM の応答は `_parse_llm_response()` が 2 段階パース（純 JSON → �
 ### `gui/app.py`
 - `MosaicApp`: メインウィンドウ。「検出」押下時に `DetectorSettingsPanel.get_detector()` を呼び検出器を動的生成
 - 検出・動画保存はバックグラウンドスレッドで実行し、UI はブロックしない
-- `self.after(0, callback)` でスレッドセーフに UI を更新
+- `QThread` とシグナル/スロットでスレッドセーフに UI を更新する
 
 ### `utils/security.py`
 - `validate_file_path()`: パストラバーサル・NUL バイト・不正拡張子を拒否
@@ -102,7 +102,7 @@ LLM の応答は `_parse_llm_response()` が 2 段階パース（純 JSON → �
 | ライブラリ | ライセンス | 用途 |
 |---|---|---|
 | Python | PSF License | ランタイム |
-| tkinter / Tcl/Tk | BSD 系 | GUI |
+| PySide6 / Qt for Python | LGPL | GUI |
 | Pillow | HPND 系 | 画像 I/O |
 | opencv-python | Apache 2.0 | 画像処理・顔検出 |
 | NumPy | BSD 3-Clause | 配列演算 |

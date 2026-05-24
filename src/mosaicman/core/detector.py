@@ -165,8 +165,14 @@ def _parse_llm_response(
             width = max(1, min(width, image_width - x))
             height = max(1, min(height, image_height - y))
             confidence = max(0.0, min(1.0, confidence))
-            regions.append(DetectedRegion(x=x, y=y, width=width, height=height,
-                                          label=label, confidence=confidence))
+            regions.append(DetectedRegion(
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                label=label,
+                confidence=confidence,
+            ))
         except (TypeError, ValueError) as exc:
             logger.debug("領域のパースに失敗しました: %s (%s)", item, exc)
 

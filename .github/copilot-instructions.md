@@ -16,11 +16,14 @@ MosaicMan は、公開済みの画像・動画へ後付けでモザイクを適�
 |---|---|
 | 言語 | Python 3.11 以上 |
 | パッケージ管理 | **uv** (`pyproject.toml` で管理) |
-| GUI フレームワーク | **tkinter**（Python 組み込み・BSD 系ライセンス） |
+| GUI フレームワーク | **PySide6 ≥ 6.7**（Qt for Python・LGPL） |
 | 画像処理 | Pillow (HPND)、OpenCV `opencv-python` (Apache 2.0) |
 | 動画処理 | OpenCV + **ffmpeg-python** (Apache 2.0、バイナリは LGPL/GPL) |
 | LLM 検出（オプション） | **ollama** (MIT) / **openai** (Apache 2.0) |
 | テスト | pytest (MIT) + pytest-cov (MIT) |
+
+> **PySide6 vs PyQt6**: Qt の Python バインディングには PySide6（LGPL）と PyQt6（GPL/商用）の 2 種類があります。
+> フリーソフト配布を前提とするため、本プロジェクトでは **PySide6 のみを使用します**。PyQt6 は使用しないでください。
 
 ### セットアップコマンド
 
@@ -56,7 +59,7 @@ uv run pytest --cov=src/mosaicman --cov-report=term-missing
 | ライブラリ | ライセンス | 備考 |
 |---|---|---|
 | Python | PSF License | ランタイム |
-| tkinter / Tcl/Tk | BSD 系 | GUI |
+| PySide6 / Qt for Python | LGPL | GUI |
 | Pillow | HPND 系 | 画像 I/O |
 | opencv-python | Apache 2.0 | 画像処理・顔検出 |
 | NumPy | BSD 3-Clause | 配列演算 |
@@ -85,7 +88,7 @@ MosaicMan/
 ├── src/
 │   └── mosaicman/
 │       ├── __init__.py          # バージョン文字列のみ
-│       ├── main.py              # エントリーポイント → MosaicApp().mainloop()
+│       ├── main.py              # エントリーポイント → QApplication を初期化して MosaicApp を起動
 │       ├── core/
 │       │   ├── mosaic.py        # モザイク効果エンジン（GUI非依存）
 │       │   ├── detector.py      # 検出器プラグイン群（Haar / Ollama / OpenAI）
@@ -117,7 +120,7 @@ GUI 層  (gui/)          ← ユーザー操作を受け取り、コア層に委
 ユーティリティ (utils/) ← セキュリティ、共通処理
 ```
 
-- `core/` のモジュールは `tkinter` を import してはいけない。
+- `core/` のモジュールは `PySide6` を import してはいけない。
 - GUI 非依存にすることで、将来的な CLI / バッチモード移行を容易にする。
 
 ### 検出器プラグインアーキテクチャ
@@ -136,9 +139,19 @@ BaseDetector (ABC)
 ### ユーザー操作フロー
 
 ```
-開く → 検出器選択 + 「検出」（バックグラウンドスレッド）→ プレビューで確認・調整
+開く → 検出器選択 + 「検出」（QThread でバックグラウンド）→ プレビューで確認・調整
   → モザイク設定で種類・強さを選択 → 「適用」（プレビュー反映）→ 「保存」
 ```
+
+### スレッドモデル（PySide6 QThread）
+
+| ワーカー | クラス | シグナル |
+|---|---|---|
+| 領域検出 | `_DetectWorker(QThread)` | `finished(list)`, `error(str)` |
+| 動画保存 | `_VideoSaveWorker(QThread)` | `finished(str)`, `error(str)`, `progress(int)` |
+
+- UI の更新は常にメインスレッドで行う（シグナル/スロットが自動的に保証）
+- tkinter の `self.after(0, ...)` パターンは使用しない（PySide6 のシグナルを使う）
 
 ---
 
@@ -176,32 +189,32 @@ BaseDetector (ABC)
 
 ### `gui/settings.py`
 
-- `SettingsPanel(ttk.LabelFrame)`:
+- `SettingsPanel(QGroupBox)`:
   - コンボボックス: モザイク種類（ピクセル化 / ぼかし / 黒帯）
   - スライダー: ブロックサイズ、ぼかし半径、黒帯本数・角度・不透明度
   - `get_config() → MosaicConfig` / `set_config(config)`
-- `DetectorSettingsPanel(ttk.LabelFrame)`:
+- `DetectorSettingsPanel(QGroupBox)`:
   - コンボボックス: 検出器種別（Haar / Ollama / OpenAI）
   - 種別切替で固有設定フィールドを show/hide
-  - OpenAI API キーは `show="*"` でマスク表示
+  - OpenAI API キーは `QLineEdit.EchoMode.Password` でマスク表示
   - `get_detector() → BaseDetector`: 設定に基づき検出器を動的生成
 
 ### `gui/preview.py`
 
-- `Region` dataclass: `x, y, width, height, label, confidence, enabled, rect_id`
-- `PreviewCanvas(tk.Canvas)`:
+- `Region` dataclass: `x, y, width, height, label, confidence, enabled`
+- `PreviewCanvas(QGraphicsView)`:
   - クリック → 領域の有効/無効トグル（赤: 有効、グレー: 無効）
-  - ドラッグ → 新規領域追加（シアン色の点線プレビュー）
+  - ドラッグ → 新規領域追加（ラバーバンドでプレビュー）
   - 画像はアスペクト比維持でキャンバスにフィット表示
   - `get_enabled_regions()` で有効領域のリストを返す
 
 ### `gui/app.py`
 
-- `MosaicApp(tk.Tk)`: ワークフロー全体を管理するメインウィンドウ
+- `MosaicApp(QMainWindow)`: ワークフロー全体を管理するメインウィンドウ
 - `_detect_regions()`: `DetectorSettingsPanel.get_detector()` で検出器を動的生成し、
-  `threading.Thread(daemon=True)` でバックグラウンド実行
-- `_update_status(msg)`: スレッドセーフ（`self.after(0, ...)` でメインスレッドへ）
-- 動画保存も別スレッドで実行
+  `QThread` ベースのワーカーでバックグラウンド実行
+- 検出結果や動画保存進捗はシグナル/スロットで UI へ反映
+- 動画保存は `QProgressDialog` で進捗表示しつつ別スレッドで実行
 
 ### `utils/security.py`
 
@@ -228,7 +241,7 @@ BaseDetector (ABC)
 - `from __future__ import annotations` を全 Python ファイルの先頭に記載
 - `@dataclass(slots=True)` を dataclass に使用する
 - 型ヒントは `str | Path` 形式（Union 型ではなく `|` 記法）
-- GUI 例外は `messagebox.showerror()` で表示し、スタックトレースをユーザーに見せない
+- GUI 例外は `QMessageBox.critical()` などで表示し、スタックトレースをユーザーに見せない
 
 ### エラー処理
 
@@ -239,18 +252,18 @@ raise ImportError("ollama パッケージをインストールしてください
 
 # GUI 層: ユーザーフレンドリーなダイアログを表示
 except Exception as exc:
-    messagebox.showerror("エラー", str(exc))
+    QMessageBox.critical(self, "エラー", str(exc))
 ```
 
 ### スレッド安全
 
-- tkinter の操作は必ずメインスレッドで行う
-- バックグラウンドスレッドから UI を更新するときは `self.after(0, callback)` を使う
+- PySide6 の UI 更新はメインスレッドで行う
+- バックグラウンド処理からの結果反映は `QThread` とシグナル/スロットを使う
 
 ### セキュリティ
 
 - API キーは絶対にログへ出力しない（`logging.debug` 等でも不可）
-- API キー入力フィールドは必ず `show="*"` を指定する
+- API キー入力フィールドは必ず `QLineEdit.EchoMode.Password` を指定する
 - ファイルパスは必ず `validate_file_path()` / `sanitize_output_path()` を通す
 
 ---
