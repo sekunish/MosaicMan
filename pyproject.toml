@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mosaicman"
+version = "0.1.0"
+description = "Desktop mosaic editor for images and videos"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "opencv-python>=4.8.1.78",
+  "Pillow>=10.2.0",
+  "numpy>=1.24",
+  "ffmpeg-python>=0.2.0",
+]
+
+[project.scripts]
+mosaicman = "mosaicman.main:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/mosaicman --cov-report=term-missing"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
